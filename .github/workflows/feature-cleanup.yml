@@ -1,0 +1,65 @@
+###############################################################################
+# Feature-Branch Cleanup — Safety-Net Cron
+#
+# Runs weekly to find and destroy orphaned feature-branch environments whose
+# branches have been deleted but whose Azure resources still exist.
+#
+# This is the "safety net" described in the plan. Primary cleanup happens
+# via the PR-closed trigger in each app-team-repo's caller workflow.
+###############################################################################
+
+name: Feature Branch Cleanup
+
+on:
+  schedule:
+    # Every Sunday at 04:00 UTC
+    - cron: "0 4 * * 0"
+  workflow_dispatch: {}  # allow manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+
+jobs:
+  cleanup:
+    name: Cleanup orphaned feature-branch environments
+    runs-on: ubuntu-latest
+    environment: Dev   # uses Dev environment credentials (sandbox scope)
+
+    steps:
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Find and destroy orphaned resource groups
+        shell: bash
+        run: |
+          echo "🔍 Searching for feature-branch resource groups..."
+
+          # Adjust the naming pattern to match your convention
+          PATTERN="rg-*-feature-*"
+          THRESHOLD_DAYS=7
+
+          CUTOFF=$(date -u -d "${THRESHOLD_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+
+          RGS=$(az group list \
+            --query "[?starts_with(name, 'rg-') && contains(name, 'feature-')].{name:name, tags:tags}" \
+            -o json)
+
+          echo "$RGS" | jq -r '.[].name' | while read -r rg; do
+            # Check if the resource group has a creation/ttl tag
+            CREATED=$(echo "$RGS" | jq -r --arg rg "$rg" '.[] | select(.name==$rg) | .tags.created_at // empty')
+
+            if [[ -n "$CREATED" && "$CREATED" < "$CUTOFF" ]]; then
+              echo "⚠️  Orphaned resource group found: $rg (created: $CREATED)"
+              echo "   Deleting $rg ..."
+              az group delete --name "$rg" --yes --no-wait
+            else
+              echo "✅ $rg is within threshold or has no created_at tag — skipping"
+            fi
+          done
+
+          echo "✅ Cleanup scan complete."

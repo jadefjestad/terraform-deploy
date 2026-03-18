@@ -1,0 +1,15 @@
+# terraform.tfvars — Customize for your organization
+#
+# Copy this file to terraform.tfvars and update the values.
+
+location             = "eastus2"
+resource_group_name  = "rg-terraform-state"
+storage_account_name = "stterraformstateorg"     # must be globally unique
+
+# Add a container for each application team
+team_containers = [
+  "default",
+  "platform-engineering",
+  # "team-alpha",
+  # "team-beta",
+]

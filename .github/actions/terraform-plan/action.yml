@@ -1,0 +1,45 @@
+###############################################################################
+# Composite Action — Terraform Plan
+#
+# Runs terraform plan, captures output, and generates a JSON representation
+# for downstream tools (Checkov, Infracost).
+###############################################################################
+
+name: Terraform Plan
+description: Run terraform plan and generate plan artifacts
+
+inputs:
+  working_directory:
+    description: "Terraform working directory"
+    required: false
+    default: "."
+
+outputs:
+  exitcode:
+    description: "Plan exit code (0=no changes, 1=error, 2=changes present)"
+    value: ${{ steps.plan.outputs.exitcode }}
+
+runs:
+  using: composite
+  steps:
+    - name: Terraform Plan
+      id: plan
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: |
+        set +e
+        terraform plan \
+          -input=false \
+          -detailed-exitcode \
+          -out=tfplan
+        EXITCODE=$?
+        echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+        if [[ $EXITCODE -eq 1 ]]; then
+          exit 1
+        fi
+
+    - name: Generate Plan JSON
+      if: ${{ steps.plan.outputs.exitcode == '2' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform show -json tfplan > tfplan.json

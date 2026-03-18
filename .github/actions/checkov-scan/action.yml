@@ -1,0 +1,43 @@
+###############################################################################
+# Composite Action — Run Checkov
+#
+# Scans a Terraform plan JSON file with Checkov and optionally uploads
+# results to the GitHub Security tab as a SARIF report.
+###############################################################################
+
+name: Checkov Scan
+description: Run Checkov against a Terraform plan JSON
+
+inputs:
+  plan_json_path:
+    description: "Path to the tfplan.json file"
+    required: true
+  soft_fail:
+    description: "Set to 'true' to warn instead of failing"
+    required: false
+    default: "false"
+  upload_sarif:
+    description: "Upload SARIF results to GitHub Security tab"
+    required: false
+    default: "true"
+
+runs:
+  using: composite
+  steps:
+    - name: Run Checkov
+      id: checkov
+      uses: bridgecrewio/checkov-action@v12
+      with:
+        file: ${{ inputs.plan_json_path }}
+        framework: terraform_plan
+        output_format: cli,sarif
+        output_file_path: console,checkov-results.sarif
+        soft_fail: ${{ inputs.soft_fail == 'true' }}
+        quiet: true
+
+    - name: Upload SARIF
+      if: ${{ inputs.upload_sarif == 'true' && always() }}
+      uses: github/codeql-action/upload-sarif@v3
+      with:
+        sarif_file: checkov-results.sarif
+      continue-on-error: true

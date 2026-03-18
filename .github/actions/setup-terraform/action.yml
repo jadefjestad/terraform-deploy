@@ -1,0 +1,41 @@
+###############################################################################
+# Composite Action — Setup Terraform
+#
+# Resolves and installs the correct Terraform version.
+# Reads from an explicit input, fallback to .terraform-version file, then
+# falls back to "latest".
+###############################################################################
+
+name: Setup Terraform
+description: Install the correct Terraform CLI version
+
+inputs:
+  terraform_version:
+    description: "Explicit Terraform version (leave empty to auto-detect from .terraform-version)"
+    required: false
+    default: ""
+  working_directory:
+    description: "Working directory containing .terraform-version"
+    required: false
+    default: "."
+
+runs:
+  using: composite
+  steps:
+    - name: Resolve version
+      id: resolve
+      shell: bash
+      run: |
+        if [[ -n "${{ inputs.terraform_version }}" ]]; then
+          echo "version=${{ inputs.terraform_version }}" >> "$GITHUB_OUTPUT"
+        elif [[ -f "${{ inputs.working_directory }}/.terraform-version" ]]; then
+          echo "version=$(cat ${{ inputs.working_directory }}/.terraform-version | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
+        else
+          echo "version=latest" >> "$GITHUB_OUTPUT"
+        fi
+
+    - name: Install Terraform
+      uses: hashicorp/setup-terraform@v3
+      with:
+        terraform_version: ${{ steps.resolve.outputs.version }}
+        terraform_wrapper: false

@@ -1,0 +1,45 @@
+###############################################################################
+# Composite Action — Terraform Apply
+#
+# Downloads the saved plan artifact and applies it, OR runs terraform destroy
+# if the destroy flag is set.
+###############################################################################
+
+name: Terraform Apply
+description: Apply a saved Terraform plan or destroy an environment
+
+inputs:
+  working_directory:
+    description: "Terraform working directory"
+    required: false
+    default: "."
+  destroy:
+    description: "Set to 'true' to run terraform destroy instead of apply"
+    required: false
+    default: "false"
+  artifact_name:
+    description: "Name of the uploaded plan artifact to download"
+    required: false
+    default: "tfplan"
+
+runs:
+  using: composite
+  steps:
+    - name: Download Plan Artifact
+      if: ${{ inputs.destroy != 'true' }}
+      uses: actions/download-artifact@v4
+      with:
+        name: ${{ inputs.artifact_name }}
+        path: ${{ inputs.working_directory }}
+
+    - name: Terraform Apply (saved plan)
+      if: ${{ inputs.destroy != 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform apply -auto-approve -input=false tfplan
+
+    - name: Terraform Destroy
+      if: ${{ inputs.destroy == 'true' }}
+      shell: bash
+      working-directory: ${{ inputs.working_directory }}
+      run: terraform destroy -auto-approve -input=false

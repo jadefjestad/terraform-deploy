@@ -1,0 +1,116 @@
+###############################################################################
+# Drift Detection — Scheduled Workflow
+#
+# Runs nightly against all persistent environments (Dev, UAT, Production).
+# If Terraform plan detects drift (non-empty plan), the workflow posts an
+# alert and creates a GitHub Issue in this repo.
+#
+# NOTE: For Iteration 1 this is informational-only (no auto-remediation).
+###############################################################################
+
+name: Drift Detection
+
+on:
+  schedule:
+    # Run nightly at 02:00 UTC
+    - cron: "0 2 * * *"
+  workflow_dispatch: {}  # allow manual trigger
+
+permissions:
+  id-token: write
+  contents: read
+  issues: write
+
+jobs:
+  detect-drift:
+    name: "Drift Check — ${{ matrix.env_name }}"
+    runs-on: ubuntu-latest
+    environment: ${{ matrix.env_name }}
+
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - env_name: Dev
+            team_name: default
+            tf_working_dir: infra
+          - env_name: UAT
+            team_name: default
+            tf_working_dir: infra
+          - env_name: Production
+            team_name: default
+            tf_working_dir: infra
+          # Add more entries per team / environment as needed
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_wrapper: false
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Terraform Init
+        working-directory: ${{ matrix.tf_working_dir }}
+        run: |
+          terraform init \
+            -backend-config="storage_account_name=${{ secrets.TF_BACKEND_STORAGE_ACCOUNT }}" \
+            -backend-config="container_name=${{ matrix.team_name }}" \
+            -backend-config="key=${{ matrix.env_name }}.tfstate" \
+            -backend-config="resource_group_name=${{ secrets.TF_BACKEND_RESOURCE_GROUP }}" \
+            -input=false
+
+      - name: Terraform Plan (drift check)
+        id: plan
+        working-directory: ${{ matrix.tf_working_dir }}
+        run: |
+          set +e
+          terraform plan -input=false -detailed-exitcode -no-color > plan_output.txt 2>&1
+          EXITCODE=$?
+          echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
+          cat plan_output.txt
+          if [[ $EXITCODE -eq 1 ]]; then
+            echo "::error::Terraform plan failed for ${{ matrix.env_name }}"
+            exit 1
+          fi
+
+      - name: Create Drift Issue
+        if: steps.plan.outputs.exitcode == '2'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            const plan = fs.readFileSync(
+              '${{ matrix.tf_working_dir }}/plan_output.txt', 'utf8'
+            ).substring(0, 50000);
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `🔍 Drift detected in ${context.payload.repository.name} — ${{ matrix.env_name }}`,
+              labels: ['drift-detected', '${{ matrix.env_name }}'],
+              body: [
+                `## Drift Detected — **${{ matrix.env_name }}**`,
+                '',
+                `Terraform plan found differences between the desired state and the actual`,
+                `cloud resources. This may indicate out-of-band changes (portal edits,`,
+                `Azure Policy remediation, etc.).`,
+                '',
+                '### Plan Output',
+                '```',
+                plan,
+                '```',
+                '',
+                `> **Action required:** Review the drift, determine the root cause, and`,
+                `> either update the Terraform code to match reality or re-apply to`,
+                `> restore the desired state.`,
+              ].join('\n'),
+            });

@@ -1,37 +1,60 @@
-# Local .terraform directories
+# ─── Terraform ────────────────────────────────────────────────────────────────
 .terraform/
-
-# .tfstate files
 *.tfstate
 *.tfstate.*
-
-# Crash log files
+.terraform.tfstate.lock.info
 crash.log
 crash.*.log
 
-# Exclude all .tfvars files, which are likely to contain sensitive data, such as
-# password, private keys, and other secrets. These should not be part of version 
-# control as they are data points which are potentially sensitive and subject 
-# to change depending on the environment.
+# Plan binary output
+*.tfplan
+*tfplan*
+
+# Sensitive variable files (keep .example files for reference)
 *.tfvars
 *.tfvars.json
+!*.tfvars.example
 
-# Ignore override files as they are usually used to override resources locally and so
-# are not checked in
+# Override files (local-only customisation)
 override.tf
 override.tf.json
 *_override.tf
 *_override.tf.json
 
-# Ignore transient lock info files created by terraform apply
-.terraform.tfstate.lock.info
-
-# Include override files you do wish to add to version control using negated pattern
-# !example_override.tf
-
-# Include tfplan files to ignore the plan output of command: terraform plan -out=tfplan
-# example: *tfplan*
-
-# Ignore CLI configuration files
+# Terraform CLI config
 .terraformrc
 terraform.rc
+
+# Terraform lock file is committed — do NOT ignore
+# !.terraform.lock.hcl
+
+# ─── Quality / Scanning Tools ────────────────────────────────────────────────
+# Checkov
+checkov-report.*
+checkov_results/
+
+# TFLint
+.tflint/
+
+# Infracost
+infracost-*.json
+.infracost/
+
+# tfsec (legacy, kept in case)
+tfsec-*.json
+
+# ─── OIDC Setup Script Artefacts ─────────────────────────────────────────────
+scripts/*.log
+scripts/*.out
+
+# ─── OS / IDE ─────────────────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+Desktop.ini
+.vscode/
+!.vscode/settings.json
+!.vscode/extensions.json
+.idea/
+*.swp
+*.swo
+*~
