@@ -99,6 +99,7 @@ The pipeline uses **two separate identities per environment** — a read-only Pl
 
 Use the provided automation script to create both identities, federated credentials, and RBAC assignments in one step:
 
+**Linux / macOS (bash):**
 ```bash
 # From the terraform-deploy repo root:
 chmod +x scripts/setup-oidc-identities.sh
@@ -112,6 +113,20 @@ chmod +x scripts/setup-oidc-identities.sh
   --state-rg rg-terraform-state \
   --state-account stterraformstateorg \
   --state-container my-team
+```
+
+**Windows (PowerShell):**
+```powershell
+# From the terraform-deploy repo root:
+.\scripts\setup-oidc-identities.ps1 `
+  -Org myorg `
+  -Repo app-team-repo `
+  -Env Production `
+  -Subscription "<PROD_SUB_ID>" `
+  -TargetRG rg-myapp-prod `
+  -StateRG rg-terraform-state `
+  -StateAccount stterraformstateorg `
+  -StateContainer my-team
 ```
 
 Repeat for each environment (Dev, UAT, Sandbox). The script outputs the Client IDs to store as GitHub secrets.
@@ -167,12 +182,23 @@ Sign up at [infracost.io](https://www.infracost.io/) and obtain an API key.
    team_containers = ["default", "platform-engineering", "new-team"]
    ```
 3. **Create split OIDC identities** for each environment (Dev, UAT, Production, Sandbox):
+
+   **Linux / macOS:**
    ```bash
    ./scripts/setup-oidc-identities.sh \
      --org myorg --repo new-team-repo --env Dev \
      --subscription <DEV_SUB_ID> --target-rg rg-newteam-dev \
      --state-rg rg-terraform-state --state-account stterraformstateorg \
      --state-container new-team
+   ```
+
+   **Windows:**
+   ```powershell
+   .\scripts\setup-oidc-identities.ps1 `
+     -Org myorg -Repo new-team-repo -Env Dev `
+     -Subscription "<DEV_SUB_ID>" -TargetRG rg-newteam-dev `
+     -StateRG rg-terraform-state -StateAccount stterraformstateorg `
+     -StateContainer new-team
    ```
    Repeat for UAT, Production, Sandbox.
 4. **Configure GitHub Environments** in the new repo with the secrets output by the script (see table below).

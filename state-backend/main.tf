@@ -40,7 +40,7 @@ provider "azurerm" {
 variable "location" {
   description = "Azure region for the state backend resources"
   type        = string
-  default     = "eastus2"
+  default     = "westus2"
 }
 
 variable "resource_group_name" {
