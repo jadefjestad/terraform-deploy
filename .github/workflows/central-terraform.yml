@@ -214,13 +214,13 @@ jobs:
 
       # ── 13. Infracost Cost Estimation ──────────────────────────────────
       - name: Setup Infracost
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' }}
+        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && secrets.INFRACOST_API_KEY != '' }}
         uses: infracost/actions/setup@v3
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
       - name: Generate Infracost Report
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' }}
+        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && secrets.INFRACOST_API_KEY != '' }}
         run: |
           infracost breakdown \
             --path tfplan.json \
@@ -228,7 +228,7 @@ jobs:
             --out-file infracost-output.json
 
       - name: Post Infracost Comment
-        if: ${{ !inputs.destroy && github.event_name == 'pull_request' }}
+        if: ${{ !inputs.destroy && github.event_name == 'pull_request' && secrets.INFRACOST_API_KEY != '' }}
         uses: infracost/actions/comment@v3
         with:
           path: infracost-output.json
