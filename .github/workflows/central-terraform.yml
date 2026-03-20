@@ -81,6 +81,12 @@ jobs:
     name: "Plan (${{ inputs.env_name }})"
     runs-on: ubuntu-latest
     environment: ${{ inputs.env_name }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD_AUTH: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_PLAN }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     defaults:
       run:
         working-directory: ${{ inputs.tf_working_dir }}
@@ -303,6 +309,12 @@ jobs:
       (inputs.destroy || needs.plan.outputs.plan_exitcode == '2')
     runs-on: ubuntu-latest
     environment: ${{ inputs.env_name }}
+    env:
+      ARM_USE_OIDC: "true"
+      ARM_USE_AZUREAD_AUTH: "true"
+      ARM_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID_APPLY }}
+      ARM_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      ARM_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
     defaults:
       run:
         working-directory: ${{ inputs.tf_working_dir }}
