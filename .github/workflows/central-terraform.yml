@@ -1,15 +1,8 @@
 ###############################################################################
-# Central Terraform Deployment Pipeline — Reusable Workflow (Iteration 1)
+# Central Terraform Deployment Pipeline — Reusable Workflow
 #
-# Maintained by the Platform Engineering team.
-# Consumed by application teams via  jobs.<id>.uses:
-#
-# Key design decisions
-#   • Two-job architecture: Plan → Apply (with artifact hand-off)
-#   • OIDC / Workload Identity Federation — no long-lived secrets
-#   • Concurrency scoped to environment + branch (never cancel mid-apply)
-#   • Checkov as the single security/policy scanner
-#   • Infracost for cost estimation
+# Minimal version — Plan → Apply with OIDC auth and artifact hand-off.
+# Add back Checkov, Infracost, TFLint, PR comments etc. once this works.
 ###############################################################################
 
 name: Central Terraform Pipeline
@@ -18,65 +11,45 @@ on:
   workflow_call:
     inputs:
       env_name:
-        description: >
-          Target environment name — must match a GitHub Environment
-          (e.g. Dev, UAT, Production, Sandbox, feature-xyz).
+        description: "Target environment name (must match a GitHub Environment)"
         required: true
         type: string
-
       tf_working_dir:
-        description: >
-          Relative path to the Terraform root module inside the calling repo.
+        description: "Relative path to the Terraform root module"
         required: false
         type: string
         default: "infra"
-
       terraform_version:
-        description: >
-          Terraform CLI version to use. If empty the pipeline reads from
-          .terraform-version in tf_working_dir.
+        description: "Terraform CLI version (blank = latest)"
         required: false
         type: string
         default: ""
-
       destroy:
-        description: >
-          Set to true to destroy the environment (e.g. feature-branch cleanup).
+        description: "Set true to destroy the environment"
         required: false
         type: boolean
         default: false
-
       plan_only:
-        description: >
-          Set to true to skip the Apply job entirely (useful for PR checks).
+        description: "Set true to skip Apply (PR checks)"
         required: false
         type: boolean
         default: false
-
       team_name:
-        description: >
-          Application team identifier — used for backend state container.
+        description: "Team identifier for backend state container"
         required: false
         type: string
         default: "default"
 
-# ── Concurrency ──────────────────────────────────────────────────────────────
-# Serialise runs per environment + branch. NEVER cancel mid-apply.
 concurrency:
   group: terraform-${{ inputs.env_name }}-${{ github.ref }}
   cancel-in-progress: false
 
-# ── Permissions ──────────────────────────────────────────────────────────────
 permissions:
-  id-token: write   # OIDC token for azure/login
-  contents: read    # checkout calling repo
-  pull-requests: write  # post plan / cost comments
-  security-events: write  # upload SARIF to Security tab
+  id-token: write
+  contents: read
 
-# ─────────────────────────────────────────────────────────────────────────────
-#  JOB 1 — Plan & Validate
-# ─────────────────────────────────────────────────────────────────────────────
 jobs:
+  # ─── Plan ──────────────────────────────────────────────────────────────────
   plan:
     name: "Plan (${{ inputs.env_name }})"
     runs-on: ubuntu-latest
@@ -90,60 +63,26 @@ jobs:
     defaults:
       run:
         working-directory: ${{ inputs.tf_working_dir }}
-
     outputs:
       plan_exitcode: ${{ steps.plan.outputs.exitcode }}
 
     steps:
-      # ── 1. Checkout the CALLING repo (not the central pipeline repo) ──
-      - name: Checkout calling repository
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # ── 2. Resolve Terraform version ───────────────────────────────────
-      - name: Resolve Terraform version
-        id: tf_version
-        shell: bash
-        run: |
-          if [[ -n "${{ inputs.terraform_version }}" ]]; then
-            echo "version=${{ inputs.terraform_version }}" >> "$GITHUB_OUTPUT"
-          elif [[ -f ".terraform-version" ]]; then
-            echo "version=$(cat .terraform-version | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=latest" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ── 3. Setup Terraform ─────────────────────────────────────────────
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ steps.tf_version.outputs.version }}
-          terraform_wrapper: false  # we capture exit codes manually
+          terraform_version: ${{ inputs.terraform_version || 'latest' }}
+          terraform_wrapper: false
 
-      # ── 4. Azure Login (OIDC) — READ-ONLY identity for Plan ─────────
-      #
-      # The Plan job uses a LOW-PRIVILEGE identity that can:
-      #   • Read infrastructure state (Storage Blob Data Reader on state container)
-      #   • Read Azure resources (Reader on target scope)
-      #   • Generate plans but CANNOT create/modify/delete resources
-      #
-      # This limits blast radius — even if the Plan job is compromised,
-      # the attacker cannot modify cloud resources.
-      #
-      # Secret naming convention:
-      #   AZURE_CLIENT_ID_PLAN  — read-only identity
-      #   AZURE_CLIENT_ID_APPLY — scoped-write identity (Apply job only)
-      #
-      - name: Azure Login (OIDC — Plan identity)
-        uses: azure/login@v2.3.1
+      - name: Azure Login (OIDC — Plan)
+        uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID_PLAN }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # ── 5. Terraform Init ──────────────────────────────────────────────
       - name: Terraform Init
         run: |
           terraform init \
@@ -153,29 +92,9 @@ jobs:
             -backend-config="resource_group_name=${{ secrets.TF_BACKEND_RESOURCE_GROUP }}" \
             -input=false
 
-      # ── 6. Terraform Format Check ──────────────────────────────────────
-      - name: Terraform Format Check
-        run: terraform fmt -check -recursive -diff
-
-      # ── 7. Terraform Validate ──────────────────────────────────────────
       - name: Terraform Validate
         run: terraform validate -no-color
 
-      # ── 8. TFLint ──────────────────────────────────────────────────────
-      - name: Setup TFLint
-        uses: terraform-linters/setup-tflint@v4
-        with:
-          tflint_version: latest
-
-      - name: Run TFLint
-        run: |
-          tflint --init
-          tflint --format compact
-
-      # ── Skip remaining steps if this is a destroy run ──────────────────
-      # (destroy runs go straight to the apply job)
-
-      # ── 9. Terraform Plan ──────────────────────────────────────────────
       - name: Terraform Plan
         if: ${{ !inputs.destroy }}
         id: plan
@@ -187,76 +106,9 @@ jobs:
             -out=tfplan
           EXITCODE=$?
           echo "exitcode=$EXITCODE" >> "$GITHUB_OUTPUT"
-          # Exit code 0 = no changes, 1 = error, 2 = changes present
-          if [[ $EXITCODE -eq 1 ]]; then
-            exit 1
-          fi
+          if [[ $EXITCODE -eq 1 ]]; then exit 1; fi
 
-      # ── 10. Generate Plan JSON (for Checkov & Infracost) ───────────────
-      - name: Generate Plan JSON
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' }}
-        run: terraform show -json tfplan > tfplan.json
-
-      # ── 11. Checkov Security Scan ──────────────────────────────────────
-      - name: Checkov Scan
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' }}
-        uses: bridgecrewio/checkov-action@v12
-        with:
-          file: ${{ inputs.tf_working_dir }}/tfplan.json
-          framework: terraform_plan
-          output_format: cli,sarif
-          output_file_path: console,checkov-results.sarif
-          soft_fail: false   # fail on critical/high findings
-          quiet: true
-        continue-on-error: false
-
-      # ── 12. Upload Checkov SARIF to GitHub Security tab ────────────────
-      - name: Upload SARIF
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && always() }}
-        uses: github/codeql-action/upload-sarif@v4
-        with:
-          sarif_file: checkov-results.sarif
-        continue-on-error: true
-
-      # ── 13. Infracost Cost Estimation ──────────────────────────────────
-      - name: Check Infracost API Key
-        id: infracost_check
-        run: |
-          if [ -n "$INFRACOST_KEY" ]; then
-            echo "available=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "available=false" >> "$GITHUB_OUTPUT"
-          fi
-        env:
-          INFRACOST_KEY: ${{ secrets.INFRACOST_API_KEY }}
-
-      - name: Setup Infracost
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && steps.infracost_check.outputs.available == 'true' }}
-        uses: infracost/actions/setup@v3
-        with:
-          api-key: ${{ secrets.INFRACOST_API_KEY }}
-
-      - name: Generate Infracost Report
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && steps.infracost_check.outputs.available == 'true' }}
-        run: |
-          infracost breakdown \
-            --path tfplan.json \
-            --format json \
-            --out-file infracost-output.json
-
-      - name: Post Infracost Comment
-        if: ${{ !inputs.destroy && github.event_name == 'pull_request' && steps.infracost_check.outputs.available == 'true' }}
-        run: |
-          infracost comment github \
-            --path infracost-output.json \
-            --repo "$GITHUB_REPOSITORY" \
-            --pull-request "${{ github.event.pull_request.number }}" \
-            --github-token "${{ github.token }}" \
-            --behavior update
-        continue-on-error: true
-
-      # ── 14. Upload Plan Artifacts ──────────────────────────────────────
-      - name: Upload Plan Artifact (binary)
+      - name: Upload Plan Artifact
         if: ${{ !inputs.destroy && steps.plan.outputs.exitcode == '2' }}
         uses: actions/upload-artifact@v4
         with:
@@ -264,43 +116,7 @@ jobs:
           path: ${{ inputs.tf_working_dir }}/tfplan
           retention-days: 5
 
-      - name: Upload Plan Artifact (JSON — audit)
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode == '2' }}
-        uses: actions/upload-artifact@v4
-        with:
-          name: tfplan-json-${{ inputs.env_name }}
-          path: ${{ inputs.tf_working_dir }}/tfplan.json
-          retention-days: 30
-
-      # ── 15. Post Plan Summary to PR ────────────────────────────────────
-      - name: Post Plan to PR
-        if: ${{ !inputs.destroy && github.event_name == 'pull_request' }}
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const fs = require('fs');
-            const { execSync } = require('child_process');
-            const plan = execSync(
-              `terraform -chdir=${{ inputs.tf_working_dir }} show -no-color tfplan`
-            ).toString().substring(0, 60000);
-
-            const body = `### Terraform Plan — \`${{ inputs.env_name }}\`
-            \`\`\`
-            ${plan}
-            \`\`\`
-            *Pusher: @${{ github.actor }}, Action: \`${{ github.event_name }}\`*`;
-
-            github.rest.issues.createComment({
-              issue_number: context.issue.number,
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              body
-            });
-        continue-on-error: true
-
-  # ───────────────────────────────────────────────────────────────────────────
-  #  JOB 2 — Deploy / Apply
-  # ───────────────────────────────────────────────────────────────────────────
+  # ─── Apply ─────────────────────────────────────────────────────────────────
   apply:
     name: "Apply (${{ inputs.env_name }})"
     needs: plan
@@ -320,52 +136,22 @@ jobs:
         working-directory: ${{ inputs.tf_working_dir }}
 
     steps:
-      # ── 1. Checkout ────────────────────────────────────────────────────
-      - name: Checkout calling repository
-        uses: actions/checkout@v5
-        with:
-          repository: ${{ github.repository }}
-          ref: ${{ github.ref }}
+      - name: Checkout
+        uses: actions/checkout@v4
 
-      # ── 2. Resolve Terraform version ───────────────────────────────────
-      - name: Resolve Terraform version
-        id: tf_version
-        shell: bash
-        run: |
-          if [[ -n "${{ inputs.terraform_version }}" ]]; then
-            echo "version=${{ inputs.terraform_version }}" >> "$GITHUB_OUTPUT"
-          elif [[ -f ".terraform-version" ]]; then
-            echo "version=$(cat .terraform-version | tr -d '[:space:]')" >> "$GITHUB_OUTPUT"
-          else
-            echo "version=latest" >> "$GITHUB_OUTPUT"
-          fi
-
-      # ── 3. Setup Terraform ─────────────────────────────────────────────
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v4
+        uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: ${{ steps.tf_version.outputs.version }}
+          terraform_version: ${{ inputs.terraform_version || 'latest' }}
           terraform_wrapper: false
 
-      # ── 4. Azure Login (OIDC) — SCOPED-WRITE identity for Apply ─────
-      #
-      # The Apply job uses a SEPARATE, HIGHER-PRIVILEGE identity that can:
-      #   • Create/modify/delete resources (Contributor on target RG only)
-      #   • Write state (Storage Blob Data Contributor on state container)
-      #
-      # This identity is scoped as narrowly as possible:
-      #   • Per-environment (separate identity per env recommended)
-      #   • Per-resource-group (not subscription-wide Contributor)
-      #   • OIDC federated credential requires matching environment claim
-      #
-      - name: Azure Login (OIDC — Apply identity)
-        uses: azure/login@v2.3.1
+      - name: Azure Login (OIDC — Apply)
+        uses: azure/login@v2
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID_APPLY }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
           subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-      # ── 5. Terraform Init ──────────────────────────────────────────────
       - name: Terraform Init
         run: |
           terraform init \
@@ -375,12 +161,10 @@ jobs:
             -backend-config="resource_group_name=${{ secrets.TF_BACKEND_RESOURCE_GROUP }}" \
             -input=false
 
-      # ── 6a. Destroy (for ephemeral environment cleanup) ────────────────
       - name: Terraform Destroy
         if: ${{ inputs.destroy }}
         run: terraform destroy -auto-approve -input=false
 
-      # ── 6b. Download Plan Artifact & Apply ─────────────────────────────
       - name: Download Plan Artifact
         if: ${{ !inputs.destroy }}
         uses: actions/download-artifact@v4
@@ -388,6 +172,6 @@ jobs:
           name: tfplan-${{ inputs.env_name }}
           path: ${{ inputs.tf_working_dir }}
 
-      - name: Terraform Apply (saved plan)
+      - name: Terraform Apply
         if: ${{ !inputs.destroy }}
         run: terraform apply -auto-approve -input=false tfplan
