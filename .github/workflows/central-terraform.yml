@@ -103,6 +103,7 @@ jobs:
         run: |
           set +e
           terraform plan \
+            -var="env_name=${{ inputs.env_name }}" \
             -input=false \
             -detailed-exitcode \
             -out=tfplan
@@ -167,7 +168,7 @@ jobs:
 
       - name: Terraform Destroy
         if: ${{ inputs.destroy }}
-        run: terraform destroy -auto-approve -input=false
+        run: terraform destroy -var="env_name=${{ inputs.env_name }}" -auto-approve -input=false
 
       - name: Download Plan Artifact
         if: ${{ !inputs.destroy }}
