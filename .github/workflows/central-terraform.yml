@@ -91,7 +91,7 @@ jobs:
     steps:
       # ── 1. Checkout the CALLING repo (not the central pipeline repo) ──
       - name: Checkout calling repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
@@ -240,10 +240,13 @@ jobs:
 
       - name: Post Infracost Comment
         if: ${{ !inputs.destroy && github.event_name == 'pull_request' && steps.infracost_check.outputs.available == 'true' }}
-        uses: infracost/actions/comment@v3
-        with:
-          path: infracost-output.json
-          behavior: update
+        run: |
+          infracost comment github \
+            --path infracost-output.json \
+            --repo "$GITHUB_REPOSITORY" \
+            --pull-request "${{ github.event.pull_request.number }}" \
+            --github-token "${{ github.token }}" \
+            --behavior update
         continue-on-error: true
 
       # ── 14. Upload Plan Artifacts ──────────────────────────────────────
@@ -307,7 +310,7 @@ jobs:
     steps:
       # ── 1. Checkout ────────────────────────────────────────────────────
       - name: Checkout calling repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v5
         with:
           repository: ${{ github.repository }}
           ref: ${{ github.ref }}
