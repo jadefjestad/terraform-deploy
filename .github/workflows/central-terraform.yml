@@ -117,7 +117,7 @@ jobs:
 
       # ── 3. Setup Terraform ─────────────────────────────────────────────
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ steps.tf_version.outputs.version }}
           terraform_wrapper: false  # we capture exit codes manually
@@ -137,7 +137,7 @@ jobs:
       #   AZURE_CLIENT_ID_APPLY — scoped-write identity (Apply job only)
       #
       - name: Azure Login (OIDC — Plan identity)
-        uses: azure/login@v2
+        uses: azure/login@v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID_PLAN }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
@@ -212,8 +212,8 @@ jobs:
 
       # ── 12. Upload Checkov SARIF to GitHub Security tab ────────────────
       - name: Upload SARIF
-        if: ${{ !inputs.destroy && always() }}
-        uses: github/codeql-action/upload-sarif@v3
+        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && always() }}
+        uses: github/codeql-action/upload-sarif@v4
         with:
           sarif_file: checkov-results.sarif
         continue-on-error: true
@@ -342,7 +342,7 @@ jobs:
 
       # ── 3. Setup Terraform ─────────────────────────────────────────────
       - name: Setup Terraform
-        uses: hashicorp/setup-terraform@v3
+        uses: hashicorp/setup-terraform@v4
         with:
           terraform_version: ${{ steps.tf_version.outputs.version }}
           terraform_wrapper: false
@@ -359,7 +359,7 @@ jobs:
       #   • OIDC federated credential requires matching environment claim
       #
       - name: Azure Login (OIDC — Apply identity)
-        uses: azure/login@v2
+        uses: azure/login@v2.3.1
         with:
           client-id: ${{ secrets.AZURE_CLIENT_ID_APPLY }}
           tenant-id: ${{ secrets.AZURE_TENANT_ID }}
