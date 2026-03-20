@@ -213,14 +213,25 @@ jobs:
         continue-on-error: true
 
       # ── 13. Infracost Cost Estimation ──────────────────────────────────
+      - name: Check Infracost API Key
+        id: infracost_check
+        run: |
+          if [ -n "$INFRACOST_KEY" ]; then
+            echo "available=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "available=false" >> "$GITHUB_OUTPUT"
+          fi
+        env:
+          INFRACOST_KEY: ${{ secrets.INFRACOST_API_KEY }}
+
       - name: Setup Infracost
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && secrets.INFRACOST_API_KEY != '' }}
+        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && steps.infracost_check.outputs.available == 'true' }}
         uses: infracost/actions/setup@v3
         with:
           api-key: ${{ secrets.INFRACOST_API_KEY }}
 
       - name: Generate Infracost Report
-        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && secrets.INFRACOST_API_KEY != '' }}
+        if: ${{ !inputs.destroy && steps.plan.outputs.exitcode != '0' && steps.infracost_check.outputs.available == 'true' }}
         run: |
           infracost breakdown \
             --path tfplan.json \
@@ -228,7 +239,7 @@ jobs:
             --out-file infracost-output.json
 
       - name: Post Infracost Comment
-        if: ${{ !inputs.destroy && github.event_name == 'pull_request' && secrets.INFRACOST_API_KEY != '' }}
+        if: ${{ !inputs.destroy && github.event_name == 'pull_request' && steps.infracost_check.outputs.available == 'true' }}
         uses: infracost/actions/comment@v3
         with:
           path: infracost-output.json
